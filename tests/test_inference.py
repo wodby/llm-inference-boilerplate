@@ -104,6 +104,29 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(endpoint('https://example.com/prefix/v1/'), 'https://example.com/prefix/v1/chat/completions')
         self.assertEqual(endpoint('http://[::1]:8000/v1'), 'http://[::1]:8000/v1/chat/completions')
 
+    def test_plain_http_reaches_cluster_internal_hosts_only(self):
+        # The in-environment endpoint documented for the Wodby vLLM stack.
+        for url in ('http://vllm:8000/v1', 'http://vllm.svc/v1', 'http://vllm.my-app.svc.cluster.local:8000/v1',
+                    'http://vllm.svc.cluster.local./v1', 'http://inference.local/v1', 'http://localhost:8000/v1',
+                    'http://127.0.0.1:8000/v1'):
+            with self.subTest(url=url):
+                self.assertTrue(endpoint(url).endswith('/v1/chat/completions'))
+
+    def test_plain_http_is_refused_for_reachable_hosts(self):
+        # A public name or address would put the bearer token on the wire in cleartext.
+        for url in ('http://api.example.com/v1', 'http://vllm.example.com/v1', 'http://203.0.113.10:8000/v1',
+                    'http://[2001:db8::1]:8000/v1', 'http://10.0.0.5:8000/v1', 'http://192.168.1.10/v1'):
+            with self.subTest(url=url), self.assertRaises(InferenceError):
+                endpoint(url)
+        # The same hosts stay available over HTTPS.
+        self.assertEqual(endpoint('https://api.example.com/v1'), 'https://api.example.com/v1/chat/completions')
+
+    def test_cluster_internal_hosts_keep_the_other_url_rules(self):
+        for url in ('http://a:secret@vllm:8000/v1', 'http://vllm:8000/v1?x=1', 'http://vllm:8000/v1#f',
+                    'http://vllm:8000/', 'http://vllm:bad/v1', 'ftp://vllm/v1'):
+            with self.subTest(url=url), self.assertRaises(InferenceError):
+                endpoint(url)
+
     def test_bad_sse(self):
         for body in (b'data: not-json\n\n', b'data: \xff\n\n', b'data: {}', b'data: ' + b'x' * 1048576):
             with self.subTest(length=len(body)), self.assertRaises(InferenceError):

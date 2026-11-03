@@ -19,6 +19,14 @@ python3 inference.py --no-thinking 'Explain what a GPU does in one sentence.'
 python3 inference.py --stream --no-thinking 'Write a short welcome message.'
 ```
 
+From another service in the same app environment, address the vLLM service
+directly instead. This needs no private-network access from outside the
+cluster:
+
+```sh
+export LLM_BASE_URL=http://vllm:8000/v1
+```
+
 `--no-thinking` is useful for the Qwen3 smoke-test preset. Omit it for models
 whose chat templates do not support this option. The API model name is the
 server's served-model name, not necessarily its Hugging Face repository name.
@@ -52,8 +60,12 @@ an invoice or a cost estimate. Missing usage is not treated as zero.
 
 ## Failure and security behavior
 
-- HTTPS is required except for loopback development URLs. Certificate checks
-  are not disabled. The base URL must end in `/v1`, without credentials,
+- HTTPS is required except for loopback development URLs and cluster-internal
+  hosts: a single-label service name such as `vllm`, or a name ending in
+  `.svc`, `.svc.cluster.local` or `.local`. Neither resolves to a host on the
+  public internet, so the bearer token stays inside the cluster network. Every
+  other host, including any public IP address, must use HTTPS. Certificate
+  checks are not disabled. The base URL must end in `/v1`, without credentials,
   query parameters or fragments.
 - Redirects are rejected so credentials are not forwarded to another endpoint.
 - Failed requests are not retried automatically: a retry can duplicate output
