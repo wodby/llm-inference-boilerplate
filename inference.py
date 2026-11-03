@@ -25,26 +25,40 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
+INTERNAL_HOST_SUFFIXES = (".svc", ".svc.cluster.local", ".local")
+
+
+def internal_host(hostname):
+    """Accept loopback and cluster-internal names, where plain HTTP cannot leave the network."""
+    host = (hostname or "").rstrip(".")
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    # A single-label name such as "vllm" resolves only through a local search
+    # domain, so it cannot address a host on the public internet.
+    return "." not in host or host.endswith(INTERNAL_HOST_SUFFIXES)
+
+
 def endpoint(base_url):
-    """Require HTTPS except for loopback development; reject embedded credentials."""
+    """Require HTTPS outside loopback and cluster-internal hosts; reject embedded credentials."""
     try:
         parsed = urllib.parse.urlsplit(base_url)
         port = parsed.port  # Validate malformed port numbers too.
         del port
-        loopback = parsed.hostname == "localhost"
-        try:
-            loopback = loopback or ipaddress.ip_address(parsed.hostname or "").is_loopback
-        except ValueError:
-            pass
         if (not parsed.hostname or parsed.username is not None or parsed.password is not None
                 or parsed.query or parsed.fragment or any(c.isspace() for c in base_url)
                 or parsed.scheme not in ("https", "http")
-                or (parsed.scheme == "http" and not loopback)):
+                or (parsed.scheme == "http" and not internal_host(parsed.hostname))):
             raise ValueError
         if not parsed.path.rstrip("/").endswith("/v1"):
             raise ValueError
     except ValueError:
-        raise InferenceError("LLM_BASE_URL must be an HTTPS API base ending in /v1 (HTTP is allowed only on loopback).") from None
+        raise InferenceError("LLM_BASE_URL must be an API base ending in /v1; HTTPS is required except for loopback and cluster-internal hosts.") from None
     return base_url.rstrip("/") + "/chat/completions"
 
 
